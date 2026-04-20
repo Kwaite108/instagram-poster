@@ -3,6 +3,7 @@ import time
 import json
 import cloudinary
 import cloudinary.uploader
+import cloudinary.api
 import anthropic
 import requests
 from pathlib import Path
@@ -23,8 +24,6 @@ cloudinary.config(
 )
 
 QUEUE_FILE = Path("queue.json")
-PHOTOS_DIR = Path("photos")
-PHOTOS_DIR.mkdir(exist_ok=True)
 
 def load_queue():
     if QUEUE_FILE.exists():
@@ -37,10 +36,19 @@ def save_queue(queue):
 def get_next_photo():
     queue = load_queue()
     posted = {item["filename"] for item in queue}
-    photos = sorted(PHOTOS_DIR.glob("*.jpg")) + sorted(PHOTOS_DIR.glob("*.jpeg")) + sorted(PHOTOS_DIR.glob("*.png"))
-    for photo in photos:
-        if photo.name not in posted:
-            return photo
+    result = cloudinary.api.resources(
+        type="upload",
+        prefix="",
+        max_results=50
+    )
+    for resource in result.get("resources", []):
+        filename = resource["public_id"]
+        if filename not in posted:
+            return {
+                "name": filename,
+                "url": resource["secure_url"],
+                "public_id": resource["public_id"]
+            }
     return None
 
 def get_recent_captions():
@@ -115,13 +123,11 @@ def send_telegram(message, reply_markup=None):
         json=payload
     )
 
-def send_photo_telegram(photo_path):
-    with open(photo_path, "rb") as f:
-        requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
-            data={"chat_id": TELEGRAM_CHAT_ID},
-            files={"photo": f}
-        )
+def send_photo_telegram(url):
+    requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
+        data={"chat_id": TELEGRAM_CHAT_ID, "photo": url}
+    )
 
 def get_approval_keyboard():
     return {
@@ -204,15 +210,10 @@ def get_telegram_text(timeout_minutes=30):
         time.sleep(5)
     return None
 
-def upload_image(image_path):
-    upload = cloudinary.uploader.upload(str(image_path))
-    return upload["secure_url"]
-
-def post_to_instagram(image_path, caption):
-    media_url = upload_image(image_path)
+def post_to_instagram(image_url, caption):
     payload = {
         "content": caption,
-        "mediaItems": [{"type": "image", "url": media_url}],
+        "mediaItems": [{"type": "image", "url": image_url}],
         "platforms": [{"platform": "instagram", "accountId": ACCOUNT_ID}],
         "publishNow": True
     }
@@ -229,15 +230,15 @@ def run_daily():
 
     photo = get_next_photo()
     if not photo:
-        print("No new photos in the photos/ folder.")
-        send_telegram("No new photos found. Add photos to the photos/ folder!")
+        print("No new photos found in Cloudinary kellygulch/ folder.")
+        send_telegram("No new photos found. Upload photos to Cloudinary in the kellygulch/ folder!")
         return
 
-    print(f"Next photo: {photo.name}")
-    caption = generate_caption(photo.name)
+    print(f"Next photo: {photo['name']}")
+    caption = generate_caption(photo["name"])
     print("Caption generated. Sending to Telegram...")
 
-    send_photo_telegram(photo)
+    send_photo_telegram(photo["url"])
     send_telegram(
         f"<b>Kelly Gulch - New Post Ready</b>\n\nCaption:\n\n{caption}\n\nWhat would you like to do?",
         get_approval_keyboard()
@@ -264,13 +265,12 @@ def run_daily():
         elif response.startswith("TWEAK:"):
             feedback = response[6:].strip()
             print(f"Tweaking: {feedback}")
-            send_telegram(f"Rewriting caption, please wait...")
-            current_caption = generate_caption(photo.name, feedback=feedback, original=current_caption)
+            send_telegram(f"Rewriting: {feedback}...")
+            current_caption = generate_caption(photo["name"], feedback=feedback, original=current_caption)
             send_telegram(
                 f"New caption:\n\n{current_caption}\n\nWhat would you like to do?",
                 get_approval_keyboard()
             )
-            continue
 
         elif response == "WRITEOWN":
             send_telegram("Type your caption and send it as a message:")
@@ -290,11 +290,11 @@ def run_daily():
             return
 
     print("Posting to Instagram...")
-    post_to_instagram(photo, final_caption)
+    post_to_instagram(photo["url"], final_caption)
 
     queue = load_queue()
     queue.append({
-        "filename": photo.name,
+        "filename": photo["name"],
         "caption": final_caption,
         "posted_at": datetime.now().isoformat()
     })
