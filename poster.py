@@ -285,6 +285,27 @@ def run_daily():
                 send_telegram("No caption received. Skipping.")
                 return
 
+        elif response == "NEXTPHOTO":
+            queue = load_queue()
+            queue.append({
+                "filename": photo["name"],
+                "caption": "skipped",
+                "posted_at": datetime.now().isoformat()
+            })
+            save_queue(queue)
+            photo = get_next_photo()
+            if not photo:
+                send_telegram("No more photos available in Cloudinary!")
+                return
+            send_telegram("Getting next photo...")
+            caption = generate_caption(photo["name"])
+            current_caption = caption
+            send_photo_telegram(photo["url"])
+            send_telegram(
+                f"<b>Kelly Gulch - New Post Ready</b>\n\nCaption:\n\n{caption}\n\nWhat would you like to do?",
+                get_approval_keyboard()
+            )
+
         else:
             print(f"Unknown response: {response}")
             return
