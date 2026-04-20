@@ -33,9 +33,9 @@ def load_queue():
 def save_queue(queue):
     QUEUE_FILE.write_text(json.dumps(queue, indent=2))
 
-def get_next_photo():
+def get_next_photo(skip=[]):
     queue = load_queue()
-    posted = {item["filename"] for item in queue}
+    posted = {item["filename"] for item in queue if item.get("caption") != "skipped"}
     result = cloudinary.api.resources(
         type="upload",
         prefix="",
@@ -43,7 +43,7 @@ def get_next_photo():
     )
     for resource in result.get("resources", []):
         filename = resource["public_id"]
-        if filename not in posted:
+        if filename not in posted and filename not in skip:
             return {
                 "name": filename,
                 "url": resource["secure_url"],
@@ -143,6 +143,9 @@ def get_approval_keyboard():
             [
                 {"text": "More direct", "callback_data": "TWEAK:make it more direct and punchy"},
                 {"text": "Write my own", "callback_data": "WRITEOWN"}
+            ],
+            [
+                {"text": "Different photo", "callback_data": "NEXTPHOTO"}
             ]
         ]
     }
@@ -227,11 +230,12 @@ def post_to_instagram(image_url, caption):
 
 def run_daily():
     print(f"\nKelly Gulch Daily Poster - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    skipped_this_session = []
 
-    photo = get_next_photo()
+    photo = get_next_photo(skip=skipped_this_session)
     if not photo:
-        print("No new photos found in Cloudinary kellygulch/ folder.")
-        send_telegram("No new photos found. Upload photos to Cloudinary in the kellygulch/ folder!")
+        print("No new photos found in Cloudinary.")
+        send_telegram("No new photos found. Upload photos to Cloudinary!")
         return
 
     print(f"Next photo: {photo['name']}")
@@ -286,16 +290,10 @@ def run_daily():
                 return
 
         elif response == "NEXTPHOTO":
-            queue = load_queue()
-            queue.append({
-                "filename": photo["name"],
-                "caption": "skipped",
-                "posted_at": datetime.now().isoformat()
-            })
-            save_queue(queue)
-            photo = get_next_photo()
+            skipped_this_session.append(photo["name"])
+            photo = get_next_photo(skip=skipped_this_session)
             if not photo:
-                send_telegram("No more photos available in Cloudinary!")
+                send_telegram("No more photos available right now!")
                 return
             send_telegram("Getting next photo...")
             caption = generate_caption(photo["name"])
