@@ -1,0 +1,5 @@
+queue.json
+.env
+__pycache__
+*.pyc
+photos/
