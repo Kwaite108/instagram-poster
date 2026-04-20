@@ -92,7 +92,7 @@ Booking@gulchguys.com
 """
 
     if feedback and original:
-        prompt = f"Rewrite this Instagram caption based on this feedback: {feedback}\n\nOriginal:\n{original}\n\nKeep the same voice and style. Return only the new caption. Use only simple dashes (-) not long dashes."
+        prompt = f"Rewrite this Instagram caption based on this feedback: {feedback}\n\nOriginal:\n{original}\n\nKeep the same voice and style. Return only the new caption text with no labels or introductions. Use only simple dashes (-) not long dashes."
     else:
         instructions = """Write an Instagram caption in our exact style:
 - Short punchy sentences. Fragments are fine.
@@ -100,7 +100,8 @@ Booking@gulchguys.com
 - Confident, not salesy. Let the location speak.
 - Speak directly to filmmakers and productions.
 - End with location (Topanga, CA), contact (booking@gulchguys.com), and 4-5 relevant hashtags.
-- Use only simple dashes (-) not long dashes."""
+- Use only simple dashes (-) not long dashes.
+- Return only the caption text with no labels or introductions."""
         prompt = f"You write Instagram captions for Kelly Gulch Cabin, a historic 1970s log cabin in Topanga, CA, 30 minutes from Hollywood. Premium film location for commercials, narrative films, and music videos. Owners are Kevin and Ben.\n\n{style_block}{instructions}\n\nImage filename: {image_name}"
 
     response = client.messages.create(
@@ -108,7 +109,12 @@ Booking@gulchguys.com
         max_tokens=400,
         messages=[{"role": "user", "content": prompt}]
     )
-    return response.content[0].text.strip()
+    caption = response.content[0].text.strip()
+    # Clean any labels Claude might add
+    for label in ["New caption:", "New Caption:", "Here's the caption:", "Caption:"]:
+        if caption.startswith(label):
+            caption = caption[len(label):].strip()
+    return caption
 
 def send_telegram(message, reply_markup=None):
     payload = {
@@ -272,7 +278,7 @@ def run_daily():
             send_telegram(f"Rewriting: {feedback}...")
             current_caption = generate_caption(photo["name"], feedback=feedback, original=current_caption)
             send_telegram(
-                f"New caption:\n\n{current_caption}\n\nWhat would you like to do?",
+                f"Updated caption:\n\n{current_caption}\n\nWhat would you like to do?",
                 get_approval_keyboard()
             )
 
